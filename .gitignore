@@ -1,0 +1,13 @@
+.idea/
+__pycache__/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Runtime Data Stores
+history_store.json
+**/history_store.json
+
+# Logs
+*.log

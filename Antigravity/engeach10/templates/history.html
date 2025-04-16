@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>歷史學習紀錄 - AI 英語疲勞轟炸機</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; max-width: 800px; margin: auto; background-color: #f8f9fa; color: #333; }
+        h2 { color: #2c3e50; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+        .back-btn { padding: 8px 15px; background-color: #7f8c8d; color: white; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; margin-bottom: 20px; }
+        .back-btn:hover { background-color: #95a5a6; }
+        
+        .container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .batch-list { flex: 1; min-width: 280px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .batch-item { padding: 12px; border: 1px solid #e2e8f0; margin-bottom: 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s; background: #fafafa; }
+        .batch-item:hover { background: #edf2f7; border-color: #cbd5e0; transform: translateY(-2px); }
+        .batch-item.active { border-color: #3498db; background-color: #ebf8ff; box-shadow: 0 0 0 1px #3498db; }
+        
+        .detail-view { flex: 2; min-width: 320px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        
+        .item-card { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: white; transition: all 0.2s; position: relative; }
+        .item-card strong { color: #2c3e50; font-size: 1.1em; }
+        
+        .play-controls { display: flex; gap: 10px; margin-bottom: 15px; }
+        .btn-play { padding: 10px 15px; background-color: #ff4757; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .btn-stop { padding: 10px 15px; background-color: #7f8c8d; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .single-loop-btn { margin-top: 5px; padding: 5px 10px; font-size: 0.85em; background-color: #f1f2f6; border: 1px solid #ced4da; border-radius: 4px; cursor: pointer; }
+        
+        .delete-btn {
+            background-color: #ff4757;
+            color: white;
+            border: none;
+            padding: 5px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8em;
+            transition: background-color 0.2s;
+        }
+        .delete-btn:hover {
+            background-color: #ff6b81;
+        }
+        
+        #play-status { font-weight: bold; margin-bottom: 15px; padding: 10px; border-radius: 5px; display: none; }
+        
+        .empty-state { text-align: center; color: #7f8c8d; padding: 40px 20px; }
+        .badge { display: inline-block; padding: 3px 8px; font-size: 0.8em; font-weight: bold; border-radius: 12px; background-color: #3498db; color: white; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <h2>📜 歷史學習批次清單</h2>
+    <a href="/" class="back-btn">⬅️ 返回首頁</a>
+
+    <div class="container">
+        <!-- 左側：批次清單 -->
+        <div class="batch-list">
+            <h3>批次列表</h3>
+            <div id="batches-container">
+                {% if batches %}
+                    {% for b in batches %}
+                        <div class="batch-item" onclick="loadBatchDetails('{{ b.batch_name }}', this)" id="batch-item-{{ b.batch_name }}">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                <div>
+                                    <strong>主題：{{ b.category if b.category else '未命名主題' }}</strong>
+                                    <div class="badge">{{ b.count }} 個項目</div>
+                                </div>
+                                <button class="delete-btn" onclick="event.stopPropagation(); deleteBatch('{{ b.batch_name }}', '{{ b.category }}')">🗑️ 刪除</button>
+                            </div>
+                            <div style="font-size: 0.85em; color: #7f8c8d; margin-top: 5px;">
+                                時間：{{ b.batch_name[0:4] }}/{{ b.batch_name[4:6] }}/{{ b.batch_name[6:8] }} {{ b.batch_name[9:11] }}:{{ b.batch_name[11:13] }}
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">尚無歷史紀錄</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 右側：詳細項目展示與播放器 -->
+        <div class="detail-view">
+            <h3>批次詳細內容</h3>
+            <div id="detail-content" class="empty-state">
+                請點擊左側批次以查看單字列表與進行循環播放。
+            </div>
+        </div>
+    </div>
+
+    <!-- 隱藏的播放器 -->
+    <audio id="audioPlayer"></audio>
+
+    <script>
+        let playlist = [];
+        let currentIndex = 0;
+        let isPlaying = false;
+        let activeSingleIndex = -1;
+        let currentLoadedBatch = "";
+        const player = document.getElementById('audioPlayer');
+
+        async function loadBatchDetails(batchName, element) {
+            // 停止任何當前的播放
+            stopBombardment();
+            stopSingleLoop();
+
+            // 切換 active 樣式
+            document.querySelectorAll('.batch-item').forEach(item => item.classList.remove('active'));
+            if (element) {
+                element.classList.add('active');
+            }
+
+            const response = await fetch(`/api/batch/${batchName}`);
+            const data = await response.json();
+
+            currentLoadedBatch = batchName;
+            playlist = [];
+            
+            let html = `
+                <div class="play-controls">
+                    <button class="btn-play" onclick="startBombardment()">▶️ 開始整批循環播放</button>
+                    <button class="btn-stop" onclick="stopBombardment()">⏸️ 停止播放</button>
+                </div>
+                <div id="play-status"></div>
+                <div id="items-container">
+            `;
+
+            data.items.forEach((item, index) => {
+                playlist.push(item.audio_file);
+                
+                // 取得安全的檔名下載
+                const safeEn = item.en.replace(/[^a-zA-Z0-9\s_-]/g, '').trim().replace(/\s+/g, '_');
+                const filename = `${batchName}_${index}_${safeEn}.mp3`;
+
+                html += `
+                    <div class="item-card" id="card-${index}">
+                        <strong>${item.en}</strong> (${item.zh})<br>
+                        <em>${item.s_en}</em><br>
+                        <span>${item.s_zh}</span><br>
+                        <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
+                            <button onclick="toggleSingleLoop('${item.audio_file}', ${index})" class="single-loop-btn" id="loop-btn-${index}">🔁 單字循環</button>
+                            <a href="/${item.audio_file}" download="${filename}" style="font-size: 0.9em; text-decoration: none;">⬇️ 下載音檔</a>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+            document.getElementById('detail-content').innerHTML = html;
+        }
+
+        // 批次循環播放邏輯
+        function startBombardment() {
+            if (playlist.length === 0) return;
+            stopSingleLoop();
+            isPlaying = true;
+            currentIndex = 0;
+            player.onended = batchOnEnded;
+            playNext();
+        }
+
+        function stopBombardment() {
+            isPlaying = false;
+            player.pause();
+            updatePlayStatus();
+        }
+
+        function playNext() {
+            if (!isPlaying) return;
+            updatePlayStatus();
+
+            document.querySelectorAll('.item-card').forEach(card => {
+                card.style.backgroundColor = '';
+                card.style.borderColor = '#ccc';
+            });
+
+            const currentCard = document.getElementById(`card-${currentIndex}`);
+            if (currentCard) {
+                currentCard.style.backgroundColor = '#e8f4fd';
+                currentCard.style.borderColor = '#1e90ff';
+                currentCard.style.borderWidth = '2px';
+            }
+
+            player.src = "/" + playlist[currentIndex];
+            player.play().catch(e => {
+                console.error("播放失敗:", e);
+                handlePlayError();
+            });
+        }
+
+        function handlePlayError() {
+            if (!isPlaying) return;
+            currentIndex++;
+            if (currentIndex >= playlist.length) {
+                currentIndex = 0;
+            }
+            setTimeout(playNext, 1000);
+        }
+
+        function batchOnEnded() {
+            currentIndex++;
+            if (currentIndex >= playlist.length) {
+                currentIndex = 0;
+            }
+            setTimeout(playNext, 1000);
+        }
+
+        player.onerror = function() {
+            console.error("播放錯誤:", player.src);
+            if (activeSingleIndex !== -1) {
+                handleSinglePlayError();
+            } else {
+                handlePlayError();
+            }
+        };
+
+        // 單字循環播放邏輯
+        function toggleSingleLoop(audioFile, index) {
+            if (activeSingleIndex === index) {
+                stopSingleLoop();
+                return;
+            }
+
+            stopBombardment();
+
+            document.querySelectorAll('.single-loop-btn').forEach(btn => {
+                btn.textContent = '🔁 單字循環';
+                btn.style.backgroundColor = '';
+                btn.style.color = '';
+            });
+
+            const btn = document.getElementById(`loop-btn-${index}`);
+            if (btn) {
+                btn.textContent = '⏸️ 停止單字循環';
+                btn.style.backgroundColor = '#8854d0';
+                btn.style.color = 'white';
+            }
+
+            document.querySelectorAll('.item-card').forEach(card => {
+                card.style.backgroundColor = '';
+                card.style.borderColor = '#ccc';
+            });
+            const card = document.getElementById(`card-${index}`);
+            if (card) {
+                card.style.backgroundColor = '#eef2f7';
+                card.style.borderColor = '#8854d0';
+                card.style.borderWidth = '2px';
+            }
+
+            activeSingleIndex = index;
+            player.src = "/" + audioFile;
+
+            player.onended = function() {
+                if (activeSingleIndex === index) {
+                    setTimeout(() => {
+                        if (activeSingleIndex === index) {
+                            player.play().catch(e => console.error(e));
+                        }
+                    }, 1000);
+                }
+            };
+
+            player.play().catch(e => {
+                console.error("單字播放失敗:", e);
+                handleSinglePlayError();
+            });
+
+            updatePlayStatus();
+        }
+
+        function stopSingleLoop() {
+            if (activeSingleIndex !== -1) {
+                const btn = document.getElementById(`loop-btn-${activeSingleIndex}`);
+                if (btn) {
+                    btn.textContent = '🔁 單字循環';
+                    btn.style.backgroundColor = '';
+                    btn.style.color = '';
+                }
+                const card = document.getElementById(`card-${activeSingleIndex}`);
+                if (card) {
+                    card.style.backgroundColor = '';
+                    card.style.borderColor = '#ccc';
+                }
+                activeSingleIndex = -1;
+                player.pause();
+                updatePlayStatus();
+            }
+        }
+
+        function handleSinglePlayError() {
+            stopSingleLoop();
+        }
+
+        function updatePlayStatus() {
+            const statusDiv = document.getElementById('play-status');
+            if (!statusDiv) return;
+
+            if (activeSingleIndex !== -1) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.backgroundColor = '#eef2f7';
+                statusDiv.style.color = '#8854d0';
+                statusDiv.innerHTML = `🔁 正在單字循環播放中...`;
+            } else if (isPlaying) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.backgroundColor = '#d4edda';
+                statusDiv.style.color = '#155724';
+                statusDiv.innerHTML = `🟢 正在整批循環播放中 (第 ${currentIndex + 1}/${playlist.length} 首)...`;
+            } else {
+                statusDiv.style.display = 'none';
+            }
+        }
+
+        async function deleteBatch(batchName, category) {
+            if (!confirm(`確定要刪除「${category || '未命名主題'}」這個批次的學習紀錄與所有音檔嗎？`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/batch/${batchName}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    // 移除左側 DOM
+                    const item = document.getElementById(`batch-item-${batchName}`);
+                    if (item) {
+                        item.remove();
+                    }
+                    // 如果當前載入的細節是剛刪除的批次，清空右側
+                    if (currentLoadedBatch === batchName) {
+                        document.getElementById('detail-content').innerHTML = `
+                            <div class="empty-state">
+                                該批次已被刪除。請點擊左側其它批次以查看。
+                            </div>
+                        `;
+                        stopBombardment();
+                        stopSingleLoop();
+                        currentLoadedBatch = "";
+                        playlist = [];
+                    }
+                    alert("已成功刪除該批次與音檔檔案！");
+                } else {
+                    alert(`刪除失敗: ${data.message}`);
+                }
+            } catch (error) {
+                console.error("刪除時發生錯誤:", error);
+                alert(`刪除失敗: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>
