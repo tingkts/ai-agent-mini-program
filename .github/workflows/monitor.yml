@@ -1,0 +1,33 @@
+name: Hospital Slot Monitor
+
+on:
+  schedule:
+    # 避開全球整點與整十分塞車尖峰，改在第 7, 17, 27, 37, 47, 57 分觸發
+    - cron: '7,17,27,37,47,57 * * * *'
+  workflow_dispatch: # 支援在 GitHub 網頁手動點擊「Run workflow」按鈕進行測試
+
+jobs:
+  check-slots:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # 指向門診監控腳本所在的子目錄路徑
+        working-directory: ./Antigravity/WebOutpatientAppointmentBookingChecker
+
+    steps:
+      - name: 下載專案程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安裝相依套件
+        run: pip install -r requirements.txt
+
+      - name: 執行門診監控腳本
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 英語疲勞轟炸機</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: auto; }
+        .item-card { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 8px; }
+        button { padding: 10px 15px; margin-top: 10px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <h2>🎯 建立新字卡清單</h2>
+    <input type="text" id="category" placeholder="輸入主題 (ignore if empty)">
+    <button onclick="generateItems()">生成 10 個項目</button>
+    <button onclick="window.open('/history', '_blank')" style="background-color: #341f97; color: white;">📜 歷史紀錄清單</button>
+
+    <hr>
+
+    <h3>🎧 疲勞轟炸播放器</h3>
+    <button onclick="startBombardment()" style="background-color: #ff4757; color: white;">▶️ 開始無限循環播放</button>
+    <button onclick="stopBombardment()">⏸️ 停止播放</button>
+
+    <div id="results" style="margin-top: 20px;"></div>
+    <!-- 隱藏的播放器，由 JS 控制 -->
+    <audio id="audioPlayer"></audio>
+
+    <script>
+        let playlist = [];
+        let currentIndex = 0;
+        let isPlaying = false;
+        let activeSingleIndex = -1;
+        let currentBatchName = "";
+        const player = document.getElementById('audioPlayer');
+
+        async function generateItems() {
+            const category = document.getElementById('category').value;
+            document.getElementById('results').innerHTML = "生成中，請稍候 (包含產生音檔)...";
+            stopBombardment();
+            stopSingleLoop();
+
+            try {
+                const formData = new FormData();
+                formData.append('category', category);
+
+                const response = await fetch('/generate', { method: 'POST', body: formData });
+                if (!response.ok) {
+                    throw new Error(`伺服器錯誤: ${response.status} ${response.statusText}`);
+                }
+                const data = await response.json();
+
+                playlist = [];
+                currentBatchName = data.batch_name;
+                
+                let sourceBadge = "";
+                if (data.source === "AI") {
+                    sourceBadge = `<span style="background-color: #d1ecf1; color: #0c5460; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; margin-left: 10px;">✨ AI 生成 (${data.engine})</span>`;
+                } else {
+                    if (data.engine.includes("呼叫失敗")) {
+                        sourceBadge = `<span style="background-color: #f8d7da; color: #721c24; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; margin-left: 10px;" title="${data.error_msg || ''}">❌ API 呼叫失敗 (已使用本地備用庫)</span>`;
+                    } else {
+                        sourceBadge = `<span style="background-color: #fff3cd; color: #856404; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; margin-left: 10px;">⚠️ 本地備用字庫 (未偵測到 .env 金鑰)</span>`;
+                    }
+                }
+                
+                let html = `<h4>批次：${data.batch_name} ${sourceBadge}</h4>`;
+
+                data.items.forEach((item, index) => {
+                    playlist.push(item.audio_file); // 將生成的 MP3 加入播放清單
+                    
+                    // 取得安全的英文檔名 (將空白轉為底線，過濾特殊字元)
+                    const safeEn = item.en.replace(/[^a-zA-Z0-9\s_-]/g, '').trim().replace(/\s+/g, '_');
+                    const downloadFilename = `${data.batch_name}_${index}_${safeEn}.mp3`;
+
+                    html += `
+                        <div class="item-card" id="card-${index}">
+                            <strong>${item.en}</strong> (${item.zh})<br>
+                            <em>${item.s_en}</em><br>
+                            <span>${item.s_zh}</span><br>
+                            <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
+                                <button onclick="toggleSingleLoop('${item.audio_file}', ${index})" class="single-loop-btn" id="loop-btn-${index}" style="padding: 5px 10px; font-size: 0.85em; cursor: pointer;">🔁 單字循環</button>
+                                <a href="/${item.audio_file}" download="${downloadFilename}" style="font-size: 0.9em; text-decoration: none;">⬇️ 下載音檔</a>
+                            </div>
+                        </div>
+                    `;
+                });
+                document.getElementById('results').innerHTML = html;
+                updatePlayStatus();
+            } catch (error) {
+                console.error("生成失敗:", error);
+                document.getElementById('results').innerHTML = `<p style="color: red;">❌ 生成失敗: ${error.message}</p>`;
+            }
+        }
+
+        // 疲勞轟炸播放邏輯
+        function startBombardment() {
+            if (playlist.length === 0) return alert("請先生成項目！");
+            stopSingleLoop(); // 播放整批前，先停用單字循環
+            isPlaying = true;
+            currentIndex = 0;
+            player.onended = batchOnEnded;
+            playNext();
+        }
+
+        function stopBombardment() {
+            isPlaying = false;
+            player.pause();
+            updatePlayStatus();
+        }
+
+        function playNext() {
+            if (!isPlaying) return;
+            updatePlayStatus();
+
+            // 移除所有卡片的播放中樣式
+            document.querySelectorAll('.item-card').forEach(card => {
+                card.style.backgroundColor = '';
+                card.style.borderColor = '#ccc';
+            });
+
+            // 高亮目前播放的卡片
+            const currentCard = document.getElementById(`card-${currentIndex}`);
+            if (currentCard) {
+                currentCard.style.backgroundColor = '#e8f4fd';
+                currentCard.style.borderColor = '#1e90ff';
+                currentCard.style.borderWidth = '2px';
+            }
+
+            player.src = "/" + playlist[currentIndex];
+            player.play().catch(e => {
+                console.error("播放失敗:", e);
+                handlePlayError();
+            });
+        }
+
+        function handlePlayError() {
+            if (!isPlaying) return;
+            currentIndex++;
+            if (currentIndex >= playlist.length) {
+                currentIndex = 0;
+            }
+            setTimeout(playNext, 1000);
+        }
+
+        function batchOnEnded() {
+            currentIndex++;
+            // 若播到最後一個，重新歸零回到第一個（無限循環）
+            if (currentIndex >= playlist.length) {
+                currentIndex = 0;
+            }
+            // 延遲 1 秒後播放下一個，讓大腦有時間吸收
+            setTimeout(playNext, 1000);
+        }
+
+        // 播放發生錯誤時
+        player.onerror = function() {
+            console.error("播放音檔錯誤:", player.src);
+            if (activeSingleIndex !== -1) {
+                handleSinglePlayError();
+            } else {
+                handlePlayError();
+            }
+        };
+
+        // 單字循環播放邏輯
+        function toggleSingleLoop(audioFile, index) {
+            // 如果點擊目前播放中的單字循環，則停止
+            if (activeSingleIndex === index) {
+                stopSingleLoop();
+                return;
+            }
+
+            // 否則，先停止整批循環
+            stopBombardment();
+
+            // 重設所有單字循環按鈕與樣式
+            document.querySelectorAll('.single-loop-btn').forEach(btn => {
+                btn.textContent = '🔁 單字循環';
+                btn.style.backgroundColor = '';
+                btn.style.color = '';
+            });
+
+            // 高亮當前點選的單字循環按鈕
+            const btn = document.getElementById(`loop-btn-${index}`);
+            if (btn) {
+                btn.textContent = '⏸️ 停止單字循環';
+                btn.style.backgroundColor = '#8854d0';
+                btn.style.color = 'white';
+            }
+
+            // 高亮目前播放的卡片
+            document.querySelectorAll('.item-card').forEach(card => {
+                card.style.backgroundColor = '';
+                card.style.borderColor = '#ccc';
+            });
+            const card = document.getElementById(`card-${index}`);
+            if (card) {
+                card.style.backgroundColor = '#eef2f7';
+                card.style.borderColor = '#8854d0';
+                card.style.borderWidth = '2px';
+            }
+
+            activeSingleIndex = index;
+            player.src = "/" + audioFile;
+
+            // 覆寫 onended 專門處理此單字的重複播放
+            player.onended = function() {
+                if (activeSingleIndex === index) {
+                    setTimeout(() => {
+                        if (activeSingleIndex === index) {
+                            player.play().catch(e => console.error(e));
+                        }
+                    }, 1000);
+                }
+            };
+
+            player.play().catch(e => {
+                console.error("單字播放失敗:", e);
+                handleSinglePlayError();
+            });
+
+            updatePlayStatus();
+        }
+
+        function stopSingleLoop() {
+            if (activeSingleIndex !== -1) {
+                const btn = document.getElementById(`loop-btn-${activeSingleIndex}`);
+                if (btn) {
+                    btn.textContent = '🔁 單字循環';
+                    btn.style.backgroundColor = '';
+                    btn.style.color = '';
+                }
+                const card = document.getElementById(`card-${activeSingleIndex}`);
+                if (card) {
+                    card.style.backgroundColor = '';
+                    card.style.borderColor = '#ccc';
+                }
+                activeSingleIndex = -1;
+                player.pause();
+                updatePlayStatus();
+            }
+        }
+
+        function handleSinglePlayError() {
+            stopSingleLoop();
+        }
+
+        function updatePlayStatus() {
+            let statusDiv = document.getElementById('play-status');
+            if (!statusDiv) {
+                statusDiv = document.createElement('div');
+                statusDiv.id = 'play-status';
+                statusDiv.style.fontWeight = 'bold';
+                statusDiv.style.marginTop = '10px';
+                statusDiv.style.padding = '10px';
+                statusDiv.style.borderRadius = '5px';
+                const resultsDiv = document.getElementById('results');
+                resultsDiv.parentNode.insertBefore(statusDiv, resultsDiv);
+            }
+            
+            if (activeSingleIndex !== -1) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.backgroundColor = '#eef2f7';
+                statusDiv.style.color = '#8854d0';
+                statusDiv.innerHTML = `🔁 正在單字循環播放中...`;
+            } else if (playlist.length === 0) {
+                statusDiv.style.display = 'none';
+            } else {
+                statusDiv.style.display = 'block';
+                if (isPlaying) {
+                    statusDiv.style.backgroundColor = '#d4edda';
+                    statusDiv.style.color = '#155724';
+                    statusDiv.innerHTML = `🟢 正在無限循環播放中 (第 ${currentIndex + 1}/${playlist.length} 首)...`;
+                } else {
+                    statusDiv.style.backgroundColor = '#f8d7da';
+                    statusDiv.style.color = '#721c24';
+                    statusDiv.innerHTML = `🔴 播放已暫停/停止`;
+                }
+            }
+        }
+    </script>
+</body>
+</html>

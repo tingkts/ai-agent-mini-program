@@ -1,0 +1,12 @@
+# 敏感憑證與設定檔
+.env
+
+# 日誌檔
+*.log
+
+# Python 快取
+__pycache__/
+*.pyc
+
+# 測試用臨時檔
+test_run.log

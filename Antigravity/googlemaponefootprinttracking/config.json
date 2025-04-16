@@ -1,0 +1,7 @@
+{
+  "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN_HERE",
+  "telegram_chat_id": "YOUR_TELEGRAM_CHAT_ID_HERE",
+  "alert_distance_km": 1.0,
+  "server_port": 5000,
+  "server_host": "0.0.0.0"
+}
